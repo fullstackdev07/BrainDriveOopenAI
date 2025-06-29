@@ -103,16 +103,23 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             "description": "OpenAI Settings Plugin for BrainDrive - Manage OpenAI API configuration",
             "version": "1.0.0",
             "type": "frontend",
+            "enabled": True,
             "icon": "Settings",
             "category": "settings",
+            "status": "active",
             "official": True,
             "author": "BrainDrive",
+            "last_updated": datetime.datetime.now().isoformat(),
             "compatibility": "1.0.0",
+            "downloads": 0,
             "scope": "BrainDriveOpenAISettings",
             "bundle_method": "webpack",
             "bundle_location": "dist/remoteEntry.js",
             "is_local": False,
             "long_description": "A comprehensive OpenAI settings management plugin that allows users to configure their OpenAI API credentials, select models, and test API connectivity. Features secure API key management, organization ID support, and advanced configuration options.",
+            "config_fields": {},
+            "messages": {},
+            "dependencies": [],
             "plugin_slug": "BrainDriveOpenAISettings",
             # Update tracking fields (matching plugin model)
             "source_type": "github",
@@ -531,9 +538,9 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             # Query for existing plugin installation
             query = text("""
                 SELECT p.id, p.name, p.version, p.status, p.created_at, p.updated_at
-                FROM plugins p
+                FROM plugin p
                 WHERE p.user_id = :user_id 
-                AND p.slug = :plugin_slug
+                AND p.plugin_slug = :plugin_slug
                 AND p.deleted_at IS NULL
                 ORDER BY p.created_at DESC
                 LIMIT 1
@@ -576,38 +583,53 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             # Insert plugin record
             plugin_insert = text("""
                 INSERT INTO plugin (
-                    user_id, slug, name, description, version, type, icon, category,
-                    official, author, compatibility, scope, bundle_method, bundle_location,
-                    is_local, long_description, source_type, source_url, update_check_url,
-                    installation_type, permissions, created_at, updated_at
+                    id, name, description, version, type, enabled, icon, category, status,
+                    official, author, last_updated, compatibility, downloads, scope,
+                    bundle_method, bundle_location, is_local, long_description,
+                    config_fields, messages, dependencies, created_at, updated_at, user_id,
+                    plugin_slug, source_type, source_url, update_check_url, last_update_check,
+                    update_available, latest_version, installation_type, permissions
                 ) VALUES (
-                    :user_id, :slug, :name, :description, :version, :type, :icon, :category,
-                    :official, :author, :compatibility, :scope, :bundle_method, :bundle_location,
-                    :is_local, :long_description, :source_type, :source_url, :update_check_url,
-                    :installation_type, :permissions, NOW(), NOW()
+                    :id, :name, :description, :version, :type, :enabled, :icon, :category,
+                    :status, :official, :author, :last_updated, :compatibility, :downloads,
+                    :scope, :bundle_method, :bundle_location, :is_local, :long_description,
+                    :config_fields, :messages, :dependencies, NOW(), NOW(), :user_id,
+                    :plugin_slug, :source_type, :source_url, :update_check_url, :last_update_check,
+                    :update_available, :latest_version, :installation_type, :permissions
                 ) RETURNING id
             """)
             
             result = await db.execute(plugin_insert, {
-                'user_id': user_id,
-                'slug': self.plugin_data['plugin_slug'],
+                'id': None,  # Let the database generate the ID
                 'name': self.plugin_data['name'],
                 'description': self.plugin_data['description'],
                 'version': self.plugin_data['version'],
                 'type': self.plugin_data['type'],
+                'enabled': self.plugin_data['enabled'],
                 'icon': self.plugin_data['icon'],
                 'category': self.plugin_data['category'],
+                'status': self.plugin_data['status'],
                 'official': self.plugin_data['official'],
                 'author': self.plugin_data['author'],
+                'last_updated': self.plugin_data['last_updated'],
                 'compatibility': self.plugin_data['compatibility'],
+                'downloads': self.plugin_data['downloads'],
                 'scope': self.plugin_data['scope'],
                 'bundle_method': self.plugin_data['bundle_method'],
                 'bundle_location': self.plugin_data['bundle_location'],
                 'is_local': self.plugin_data['is_local'],
                 'long_description': self.plugin_data['long_description'],
+                'config_fields': json.dumps(self.plugin_data['config_fields']),
+                'messages': json.dumps(self.plugin_data['messages']),
+                'dependencies': json.dumps(self.plugin_data['dependencies']),
+                'user_id': user_id,
+                'plugin_slug': self.plugin_data['plugin_slug'],
                 'source_type': self.plugin_data['source_type'],
                 'source_url': self.plugin_data['source_url'],
                 'update_check_url': self.plugin_data['update_check_url'],
+                'last_update_check': self.plugin_data['last_update_check'],
+                'update_available': self.plugin_data['update_available'],
+                'latest_version': self.plugin_data['latest_version'],
                 'installation_type': self.plugin_data['installation_type'],
                 'permissions': json.dumps(self.plugin_data['permissions'])
             })
@@ -706,9 +728,9 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
         try:
             # Get plugin data
             plugin_query = text("""
-                SELECT id, slug, name, version, status, created_at, updated_at
+                SELECT id, plugin_slug, name, version, status, created_at, updated_at
                 FROM plugin 
-                WHERE user_id = :user_id AND slug = :plugin_slug AND deleted_at IS NULL
+                WHERE user_id = :user_id AND plugin_slug = :plugin_slug AND deleted_at IS NULL
             """)
             
             plugin_result = await db.execute(plugin_query, {
@@ -722,7 +744,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             
             plugin_data = {
                 'id': plugin_row[0],
-                'slug': plugin_row[1],
+                'plugin_slug': plugin_row[1],
                 'name': plugin_row[2],
                 'version': plugin_row[3],
                 'status': plugin_row[4],
@@ -788,7 +810,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             plugin_update = text("""
                 UPDATE plugin
                 SET status = :status, updated_at = NOW()
-                WHERE user_id = :user_id AND slug = :plugin_slug AND deleted_at IS NULL
+                WHERE user_id = :user_id AND plugin_slug = :plugin_slug AND deleted_at IS NULL
             """)
             
             await db.execute(plugin_update, {
@@ -808,7 +830,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     SET config_fields = :config_fields, updated_at = NOW()
                     WHERE plugin_id IN (
                         SELECT id FROM plugin
-                        WHERE user_id = :user_id AND slug = :plugin_slug AND deleted_at IS NULL
+                        WHERE user_id = :user_id AND plugin_slug = :plugin_slug AND deleted_at IS NULL
                     ) AND name = :module_name
                 """)
                 
