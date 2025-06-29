@@ -579,6 +579,12 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
     async def _create_database_records(self, user_id: str, db: AsyncSession) -> Dict[str, Any]:
         """Create database records for the plugin installation"""
         try:
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            plugin_slug = self.plugin_data['plugin_slug']
+            plugin_id = f"{user_id}_{plugin_slug}"
+            
+            logger.info(f"BrainDriveOpenAISettings: Creating database records - user_id: {user_id}, plugin_slug: {plugin_slug}, plugin_id: {plugin_id}")
+            
             # Insert plugin record
             plugin_insert = text("""
                 INSERT INTO plugin (
@@ -592,115 +598,105 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     :id, :name, :description, :version, :type, :enabled, :icon, :category,
                     :status, :official, :author, :last_updated, :compatibility, :downloads,
                     :scope, :bundle_method, :bundle_location, :is_local, :long_description,
-                    :config_fields, :messages, :dependencies, datetime('now'), datetime('now'), :user_id,
+                    :config_fields, :messages, :dependencies, :created_at, :updated_at, :user_id,
                     :plugin_slug, :source_type, :source_url, :update_check_url, :last_update_check,
                     :update_available, :latest_version, :installation_type, :permissions
                 )
             """)
             
-            result = await db.execute(plugin_insert, {
-                'id': None,  # Let the database generate the ID
+            await db.execute(plugin_insert, {
+                'id': plugin_id,
                 'name': self.plugin_data['name'],
                 'description': self.plugin_data['description'],
                 'version': self.plugin_data['version'],
                 'type': self.plugin_data['type'],
-                'enabled': 1 if self.plugin_data['enabled'] else 0,
+                'enabled': True,
                 'icon': self.plugin_data['icon'],
                 'category': self.plugin_data['category'],
-                'status': self.plugin_data['status'],
-                'official': 1 if self.plugin_data['official'] else 0,
+                'status': 'activated',
+                'official': self.plugin_data['official'],
                 'author': self.plugin_data['author'],
-                'last_updated': self.plugin_data['last_updated'],
+                'last_updated': current_time,
                 'compatibility': self.plugin_data['compatibility'],
-                'downloads': self.plugin_data['downloads'],
+                'downloads': 0,
                 'scope': self.plugin_data['scope'],
                 'bundle_method': self.plugin_data['bundle_method'],
                 'bundle_location': self.plugin_data['bundle_location'],
-                'is_local': 1 if self.plugin_data['is_local'] else 0,
+                'is_local': self.plugin_data['is_local'],
                 'long_description': self.plugin_data['long_description'],
-                'config_fields': json.dumps(self.plugin_data['config_fields']),
-                'messages': json.dumps(self.plugin_data['messages']),
-                'dependencies': json.dumps(self.plugin_data['dependencies']),
+                'config_fields': json.dumps({}),
+                'messages': None,
+                'dependencies': None,
+                'created_at': current_time,
+                'updated_at': current_time,
                 'user_id': user_id,
                 'plugin_slug': self.plugin_data['plugin_slug'],
                 'source_type': self.plugin_data['source_type'],
                 'source_url': self.plugin_data['source_url'],
                 'update_check_url': self.plugin_data['update_check_url'],
                 'last_update_check': self.plugin_data['last_update_check'],
-                'update_available': 1 if self.plugin_data['update_available'] else 0,
+                'update_available': self.plugin_data['update_available'],
                 'latest_version': self.plugin_data['latest_version'],
                 'installation_type': self.plugin_data['installation_type'],
                 'permissions': json.dumps(self.plugin_data['permissions'])
             })
             
-            # Get the inserted plugin ID
-            plugin_id_query = text("""
-                SELECT id FROM plugin 
-                WHERE user_id = :user_id AND plugin_slug = :plugin_slug 
-                ORDER BY created_at DESC LIMIT 1
-            """)
-            
-            plugin_id_result = await db.execute(plugin_id_query, {
-                'user_id': user_id,
-                'plugin_slug': self.plugin_data['plugin_slug']
-            })
-            
-            plugin_id = plugin_id_result.scalar()
-            
             # Insert module records
             modules_created = []
-            for module in self.module_data:
+            for module_data in self.module_data:
+                module_id = f"{user_id}_{plugin_slug}_{module_data['name']}"
+                
                 module_insert = text("""
-                    INSERT INTO plugin_modules (
-                        plugin_id, name, display_name, description, icon, category,
-                        priority, props, config_fields, messages, required_services,
-                        dependencies, layout, tags, created_at, updated_at
+                    INSERT INTO module (
+                        id, plugin_id, name, display_name, description, icon, category,
+                        enabled, priority, props, config_fields, messages, required_services,
+                        dependencies, layout, tags, created_at, updated_at, user_id
                     ) VALUES (
-                        :plugin_id, :name, :display_name, :description, :icon, :category,
-                        :priority, :props, :config_fields, :messages, :required_services,
-                        :dependencies, :layout, :tags, datetime('now'), datetime('now')
+                        :id, :plugin_id, :name, :display_name, :description, :icon, :category,
+                        :enabled, :priority, :props, :config_fields, :messages, :required_services,
+                        :dependencies, :layout, :tags, :created_at, :updated_at, :user_id
                     )
                 """)
                 
-                module_result = await db.execute(module_insert, {
-                    'plugin_id': plugin_id,
-                    'name': module['name'],
-                    'display_name': module['display_name'],
-                    'description': module['description'],
-                    'icon': module['icon'],
-                    'category': module['category'],
-                    'priority': module['priority'],
-                    'props': json.dumps(module['props']),
-                    'config_fields': json.dumps(module['config_fields']),
-                    'messages': json.dumps(module['messages']),
-                    'required_services': json.dumps(module['required_services']),
-                    'dependencies': json.dumps(module['dependencies']),
-                    'layout': json.dumps(module['layout']),
-                    'tags': json.dumps(module['tags'])
-                })
-                
-                # Get the inserted module ID
-                module_id_query = text("""
-                    SELECT id FROM plugin_modules 
-                    WHERE plugin_id = :plugin_id AND name = :module_name
-                    ORDER BY created_at DESC LIMIT 1
-                """)
-                
-                module_id_result = await db.execute(module_id_query, {
-                    'plugin_id': plugin_id,
-                    'module_name': module['name']
-                })
-                
-                module_id = module_id_result.scalar()
-                modules_created.append({
+                await db.execute(module_insert, {
                     'id': module_id,
-                    'name': module['name'],
-                    'display_name': module['display_name']
+                    'plugin_id': plugin_id,
+                    'name': module_data['name'],
+                    'display_name': module_data['display_name'],
+                    'description': module_data['description'],
+                    'icon': module_data['icon'],
+                    'category': module_data['category'],
+                    'enabled': True,
+                    'priority': module_data['priority'],
+                    'props': json.dumps(module_data['props']),
+                    'config_fields': json.dumps(module_data['config_fields']),
+                    'messages': json.dumps(module_data['messages']),
+                    'required_services': json.dumps(module_data['required_services']),
+                    'dependencies': json.dumps(module_data['dependencies']),
+                    'layout': json.dumps(module_data['layout']),
+                    'tags': json.dumps(module_data['tags']),
+                    'created_at': current_time,
+                    'updated_at': current_time,
+                    'user_id': user_id
                 })
+                
+                modules_created.append(module_id)
             
+            # Commit the transaction
             await db.commit()
+            logger.info(f"BrainDriveOpenAISettings: Database transaction committed successfully")
             
-            logger.info(f"BrainDriveOpenAISettings: Created database records for {user_id}, plugin_id: {plugin_id}")
+            # Verify the plugin was actually created
+            verify_query = text("SELECT id, plugin_slug FROM plugin WHERE id = :plugin_id AND user_id = :user_id")
+            verify_result = await db.execute(verify_query, {'plugin_id': plugin_id, 'user_id': user_id})
+            verify_row = verify_result.fetchone()
+            
+            if verify_row:
+                logger.info(f"BrainDriveOpenAISettings: Successfully created and verified database records for plugin {plugin_id} with {len(modules_created)} modules")
+            else:
+                logger.error(f"BrainDriveOpenAISettings: Plugin creation appeared to succeed but verification failed for plugin_id: {plugin_id}")
+                return {'success': False, 'error': 'Plugin creation verification failed'}
+            
             return {
                 'success': True,
                 'plugin_id': plugin_id,
@@ -708,8 +704,8 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             }
             
         except Exception as e:
-            await db.rollback()
             logger.error(f"BrainDriveOpenAISettings: Error creating database records: {e}")
+            await db.rollback()
             return {'success': False, 'error': str(e)}
     
     async def _delete_database_records(self, user_id: str, plugin_id: str, db: AsyncSession) -> Dict[str, Any]:
@@ -717,7 +713,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
         try:
             # Get modules to be deleted
             modules_query = text("""
-                SELECT id, name, display_name FROM plugin_modules 
+                SELECT id, name, display_name FROM module 
                 WHERE plugin_id = :plugin_id
             """)
             
@@ -726,7 +722,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             deleted_modules = [{'id': m[0], 'name': m[1], 'display_name': m[2]} for m in modules]
             
             # Delete modules
-            module_delete = text("DELETE FROM plugin_modules WHERE plugin_id = :plugin_id")
+            module_delete = text("DELETE FROM module WHERE plugin_id = :plugin_id")
             await db.execute(module_delete, {'plugin_id': plugin_id})
             
             # Delete plugin
@@ -780,7 +776,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                 SELECT name, display_name, description, icon, category, priority,
                        props, config_fields, messages, required_services, dependencies,
                        layout, tags, created_at, updated_at
-                FROM plugin_modules 
+                FROM module 
                 WHERE plugin_id = :plugin_id
             """)
             
@@ -849,7 +845,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     continue
                 
                 module_update = text("""
-                    UPDATE plugin_modules 
+                    UPDATE module 
                     SET config_fields = :config_fields, updated_at = datetime('now')
                     WHERE plugin_id IN (
                         SELECT id FROM plugin
