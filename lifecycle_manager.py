@@ -575,7 +575,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
         try:
             # Insert plugin record
             plugin_insert = text("""
-                INSERT INTO plugins (
+                INSERT INTO plugin (
                     user_id, slug, name, description, version, type, icon, category,
                     official, author, compatibility, scope, bundle_method, bundle_location,
                     is_local, long_description, source_type, source_url, update_check_url,
@@ -685,7 +685,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             await db.execute(module_delete, {'plugin_id': plugin_id})
             
             # Delete plugin
-            plugin_delete = text("DELETE FROM plugins WHERE id = :plugin_id AND user_id = :user_id")
+            plugin_delete = text("DELETE FROM plugin WHERE id = :plugin_id AND user_id = :user_id")
             await db.execute(plugin_delete, {'plugin_id': plugin_id, 'user_id': user_id})
             
             await db.commit()
@@ -707,7 +707,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             # Get plugin data
             plugin_query = text("""
                 SELECT id, slug, name, version, status, created_at, updated_at
-                FROM plugins 
+                FROM plugin 
                 WHERE user_id = :user_id AND slug = :plugin_slug AND deleted_at IS NULL
             """)
             
@@ -786,7 +786,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             
             # Update existing plugin with imported data
             plugin_update = text("""
-                UPDATE plugins 
+                UPDATE plugin
                 SET status = :status, updated_at = NOW()
                 WHERE user_id = :user_id AND slug = :plugin_slug AND deleted_at IS NULL
             """)
@@ -807,7 +807,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     UPDATE plugin_modules 
                     SET config_fields = :config_fields, updated_at = NOW()
                     WHERE plugin_id IN (
-                        SELECT id FROM plugins 
+                        SELECT id FROM plugin
                         WHERE user_id = :user_id AND slug = :plugin_slug AND deleted_at IS NULL
                     ) AND name = :module_name
                 """)
