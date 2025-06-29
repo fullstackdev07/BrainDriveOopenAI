@@ -541,7 +541,6 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                 FROM plugin p
                 WHERE p.user_id = :user_id 
                 AND p.plugin_slug = :plugin_slug
-                AND p.deleted_at IS NULL
                 ORDER BY p.created_at DESC
                 LIMIT 1
             """)
@@ -593,10 +592,10 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     :id, :name, :description, :version, :type, :enabled, :icon, :category,
                     :status, :official, :author, :last_updated, :compatibility, :downloads,
                     :scope, :bundle_method, :bundle_location, :is_local, :long_description,
-                    :config_fields, :messages, :dependencies, NOW(), NOW(), :user_id,
+                    :config_fields, :messages, :dependencies, datetime('now'), datetime('now'), :user_id,
                     :plugin_slug, :source_type, :source_url, :update_check_url, :last_update_check,
                     :update_available, :latest_version, :installation_type, :permissions
-                ) RETURNING id
+                )
             """)
             
             result = await db.execute(plugin_insert, {
@@ -605,11 +604,11 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                 'description': self.plugin_data['description'],
                 'version': self.plugin_data['version'],
                 'type': self.plugin_data['type'],
-                'enabled': self.plugin_data['enabled'],
+                'enabled': 1 if self.plugin_data['enabled'] else 0,
                 'icon': self.plugin_data['icon'],
                 'category': self.plugin_data['category'],
                 'status': self.plugin_data['status'],
-                'official': self.plugin_data['official'],
+                'official': 1 if self.plugin_data['official'] else 0,
                 'author': self.plugin_data['author'],
                 'last_updated': self.plugin_data['last_updated'],
                 'compatibility': self.plugin_data['compatibility'],
@@ -617,7 +616,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                 'scope': self.plugin_data['scope'],
                 'bundle_method': self.plugin_data['bundle_method'],
                 'bundle_location': self.plugin_data['bundle_location'],
-                'is_local': self.plugin_data['is_local'],
+                'is_local': 1 if self.plugin_data['is_local'] else 0,
                 'long_description': self.plugin_data['long_description'],
                 'config_fields': json.dumps(self.plugin_data['config_fields']),
                 'messages': json.dumps(self.plugin_data['messages']),
@@ -628,13 +627,25 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                 'source_url': self.plugin_data['source_url'],
                 'update_check_url': self.plugin_data['update_check_url'],
                 'last_update_check': self.plugin_data['last_update_check'],
-                'update_available': self.plugin_data['update_available'],
+                'update_available': 1 if self.plugin_data['update_available'] else 0,
                 'latest_version': self.plugin_data['latest_version'],
                 'installation_type': self.plugin_data['installation_type'],
                 'permissions': json.dumps(self.plugin_data['permissions'])
             })
             
-            plugin_id = result.scalar()
+            # Get the inserted plugin ID
+            plugin_id_query = text("""
+                SELECT id FROM plugin 
+                WHERE user_id = :user_id AND plugin_slug = :plugin_slug 
+                ORDER BY created_at DESC LIMIT 1
+            """)
+            
+            plugin_id_result = await db.execute(plugin_id_query, {
+                'user_id': user_id,
+                'plugin_slug': self.plugin_data['plugin_slug']
+            })
+            
+            plugin_id = plugin_id_result.scalar()
             
             # Insert module records
             modules_created = []
@@ -647,8 +658,8 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     ) VALUES (
                         :plugin_id, :name, :display_name, :description, :icon, :category,
                         :priority, :props, :config_fields, :messages, :required_services,
-                        :dependencies, :layout, :tags, NOW(), NOW()
-                    ) RETURNING id
+                        :dependencies, :layout, :tags, datetime('now'), datetime('now')
+                    )
                 """)
                 
                 module_result = await db.execute(module_insert, {
@@ -668,7 +679,19 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                     'tags': json.dumps(module['tags'])
                 })
                 
-                module_id = module_result.scalar()
+                # Get the inserted module ID
+                module_id_query = text("""
+                    SELECT id FROM plugin_modules 
+                    WHERE plugin_id = :plugin_id AND name = :module_name
+                    ORDER BY created_at DESC LIMIT 1
+                """)
+                
+                module_id_result = await db.execute(module_id_query, {
+                    'plugin_id': plugin_id,
+                    'module_name': module['name']
+                })
+                
+                module_id = module_id_result.scalar()
                 modules_created.append({
                     'id': module_id,
                     'name': module['name'],
@@ -730,7 +753,7 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             plugin_query = text("""
                 SELECT id, plugin_slug, name, version, status, created_at, updated_at
                 FROM plugin 
-                WHERE user_id = :user_id AND plugin_slug = :plugin_slug AND deleted_at IS NULL
+                WHERE user_id = :user_id AND plugin_slug = :plugin_slug
             """)
             
             plugin_result = await db.execute(plugin_query, {
@@ -809,8 +832,8 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
             # Update existing plugin with imported data
             plugin_update = text("""
                 UPDATE plugin
-                SET status = :status, updated_at = NOW()
-                WHERE user_id = :user_id AND plugin_slug = :plugin_slug AND deleted_at IS NULL
+                SET status = :status, updated_at = datetime('now')
+                WHERE user_id = :user_id AND plugin_slug = :plugin_slug
             """)
             
             await db.execute(plugin_update, {
@@ -827,10 +850,10 @@ class BrainDriveOpenAISettingsLifecycleManager(BaseLifecycleManager):
                 
                 module_update = text("""
                     UPDATE plugin_modules 
-                    SET config_fields = :config_fields, updated_at = NOW()
+                    SET config_fields = :config_fields, updated_at = datetime('now')
                     WHERE plugin_id IN (
                         SELECT id FROM plugin
-                        WHERE user_id = :user_id AND plugin_slug = :plugin_slug AND deleted_at IS NULL
+                        WHERE user_id = :user_id AND plugin_slug = :plugin_slug
                     ) AND name = :module_name
                 """)
                 
